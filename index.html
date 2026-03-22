@@ -1,15 +1,14 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
     
     <style>
-      body { margin: 0; overflow: hidden; }
+      body { margin: 0; overflow: hidden; touch-action: none; }
       
-      /* Scanning Message Overlay */
       #scanning-overlay {
         position: fixed; top: 0; left: 0; width: 100%; height: 100%;
         background: rgba(0, 0, 0, 0.8);
@@ -19,51 +18,88 @@
       }
       #scanning-overlay.hidden { display: none !important; }
 
-      /* Control Buttons */
       #ui-container {
         position: fixed; bottom: 20px; left: 50%;
         transform: translateX(-50%); z-index: 100;
-        display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: 95%;
+        display: flex; gap: 10px; justify-content: center; width: 95%;
       }
       .btn {
         background: rgba(0, 0, 0, 0.75); color: white; border: 2px solid #fff;
-        padding: 12px 20px; border-radius: 30px; font-family: sans-serif;
+        padding: 12px 25px; border-radius: 30px; font-family: sans-serif;
         font-weight: bold; cursor: pointer; font-size: 14px;
-        transition: 0.2s;
         -webkit-tap-highlight-color: transparent;
       }
-      .btn:active { background: white; color: black; }
     </style>
 
     <script>
-      // --- EASY SWAP CONFIGURATION ---
-      // Ensure the order here matches the order of images in your .mind file
       const TARGETS = [
-        { name: "Dance",    modelSrc: "dance.glb",   scale: "1 1 1",   pos: "0 0.1 0" },
+        { name: "Dance",    modelSrc: "dance.glb",    scale: "1 1 1",   pos: "0 0.1 0" },
         { name: "TRactor", modelSrc: "running.glb", scale: "0.5 0.5 0.5", pos: "0 0.2 0" },
         { name: "Toaster", modelSrc: "wins.glb", scale: "1.5 1.5 1.5", pos: "0 0 0" }
       ];
 
-      // Drag to Rotate Component
-      AFRAME.registerComponent('drag-rotate', {
-        schema: { speed: {default: 2} },
+      // Combined Drag-Rotate & Pinch-Scale Component
+      AFRAME.registerComponent('gesture-handler', {
+        schema: { speed: {default: 2}, sensitive: {default: 0.005} },
         init: function() {
-          this.ifMouseDown = false; this.x_cord = 0;
-          const handleStart = (x) => { this.ifMouseDown = true; this.x_cord = x; };
-          const handleEnd = () => { this.ifMouseDown = false; };
-          const handleMove = (x) => {
-            if(this.ifMouseDown) {
+          this.initialScale = this.el.object3D.scale.clone();
+          this.currentScale = 1;
+          this.lastDist = 0;
+          this.ifMouseDown = false;
+          
+          const handleTouchStart = (e) => {
+            if (e.touches.length === 1) {
+              this.ifMouseDown = true;
+              this.x_cord = e.touches[0].clientX;
+            } else if (e.touches.length === 2) {
+              this.ifMouseDown = false; // Disable rotation during pinch
+              this.lastDist = Math.hypot(
+                e.touches[0].pageX - e.touches[1].pageX,
+                e.touches[0].pageY - e.touches[1].pageY
+              );
+            }
+          };
+
+          const handleTouchMove = (e) => {
+            if (e.touches.length === 1 && this.ifMouseDown) {
+              let x = e.touches[0].clientX;
               let temp_x = x - this.x_cord;
               this.el.object3D.rotateY(temp_x * (this.data.speed / 1000));
               this.x_cord = x;
+            } else if (e.touches.length === 2) {
+              let dist = Math.hypot(
+                e.touches[0].pageX - e.touches[1].pageX,
+                e.touches[0].pageY - e.touches[1].pageY
+              );
+              
+              let diff = (dist - this.lastDist) * this.data.sensitive;
+              this.currentScale = Math.max(0.1, this.currentScale + diff);
+              
+              this.el.object3D.scale.set(
+                this.initialScale.x * this.currentScale,
+                this.initialScale.y * this.currentScale,
+                this.initialScale.z * this.currentScale
+              );
+              this.lastDist = dist;
             }
           };
-          document.addEventListener('mousedown', (e) => handleStart(e.clientX));
-          document.addEventListener('touchstart', (e) => handleStart(e.touches[0].clientX));
-          document.addEventListener('mouseup', handleEnd);
-          document.addEventListener('touchend', handleEnd);
-          document.addEventListener('mousemove', (e) => handleMove(e.clientX));
-          document.addEventListener('touchmove', (e) => handleMove(e.touches[0].clientX));
+
+          const handleEnd = () => { this.ifMouseDown = false; this.lastDist = 0; };
+
+          window.addEventListener('touchstart', handleTouchStart);
+          window.addEventListener('touchmove', handleTouchMove);
+          window.addEventListener('touchend', handleEnd);
+          
+          // Mouse Fallback for rotation
+          window.addEventListener('mousedown', (e) => { this.ifMouseDown = true; this.x_cord = e.clientX; });
+          window.addEventListener('mousemove', (e) => {
+            if(this.ifMouseDown) {
+              let temp_x = e.clientX - this.x_cord;
+              this.el.object3D.rotateY(temp_x * (this.data.speed / 1000));
+              this.x_cord = e.clientX;
+            }
+          });
+          window.addEventListener('mouseup', handleEnd);
         }
       });
     </script>
@@ -75,9 +111,7 @@
     </div>
 
     <div id="ui-container">
-      <button class="btn" id="zOut">Zoom -</button>
-      <button class="btn" id="toggleMode">Switch Vertical</button>
-      <button class="btn" id="zIn">Zoom +</button>
+      <button class="btn" id="toggleMode">Switch Vertical View</button>
     </div>
 
     <a-scene id="ar-scene"
@@ -88,9 +122,7 @@
       vr-mode-ui="enabled: false">
       
       <a-assets id="asset-container"></a-assets>
-
       <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
-      
       <a-entity light="type: hemisphere; intensity: 2.0"></a-entity>
       <a-entity light="type: directional; intensity: 1.5" position="-1 2 1"></a-entity>
     </a-scene>
@@ -104,29 +136,26 @@
 
       sceneEl.addEventListener('loaded', () => {
         TARGETS.forEach((config, index) => {
-          // 1. Create Asset Reference
           const asset = document.createElement('a-asset-item');
           asset.setAttribute('id', `model-${index}`);
           asset.setAttribute('src', config.modelSrc);
           assetContainer.appendChild(asset);
 
-          // 2. Create AR Target Entity
           const target = document.createElement('a-entity');
           target.setAttribute('mindar-image-target', `targetIndex: ${index}`);
 
-          // 3. Create Model Entity
           const model = document.createElement('a-gltf-model');
           model.setAttribute('src', `#model-${index}`);
           model.setAttribute('rotation', '90 0 0');
           model.setAttribute('position', config.pos);
           model.setAttribute('scale', config.scale);
-          model.setAttribute('drag-rotate', '');
+          // New gesture handler handles both rotation and pinch scaling
+          model.setAttribute('gesture-handler', ''); 
           model.setAttribute('animation-mixer', '');
           
           target.appendChild(model);
           sceneEl.appendChild(target);
 
-          // Visibility Toggles
           target.addEventListener("targetFound", () => { overlay.classList.add("hidden"); });
           target.addEventListener("targetLost", () => { overlay.classList.remove("hidden"); });
         });
@@ -135,21 +164,9 @@
         scanText.innerText = "Point camera at:\n" + namesList;
       });
 
-      // Zoom functionality
-      document.querySelector('#zIn').addEventListener('click', () => adjustZoom(0.15));
-      document.querySelector('#zOut').addEventListener('click', () => adjustZoom(-0.15));
-      
-      function adjustZoom(amount) {
-        document.querySelectorAll('a-gltf-model').forEach(model => {
-          let s = model.getAttribute('scale');
-          model.setAttribute('scale', `${s.x + amount} ${s.y + amount} ${s.z + amount}`);
-        });
-      }
-
-      // Vertical/Flat Rotation Toggle
       document.querySelector('#toggleMode').addEventListener('click', function() {
         isVertical = !isVertical;
-        this.innerText = isVertical ? "Switch Flat" : "Switch Vertical";
+        this.innerText = isVertical ? "Switch Flat View" : "Switch Vertical View";
         document.querySelectorAll('a-gltf-model').forEach(model => {
           model.setAttribute('rotation', isVertical ? '0 0 0' : '90 0 0');
         });
