@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
+    
+    <style>
+      body { margin: 0; overflow: hidden; touch-action: none; background-color: #000; }
+      
+      /* Splash Screen / Instructions Overlay */
+      #instructions-overlay {
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: white;
+        display: flex; flex-direction: column; justify-content: center; align-items: center;
+        z-index: 1000; text-align: center; padding: 20px; box-sizing: border-box;
+      }
+      #instructions-overlay img {
+        max-width: 80%; max-height: 60vh; margin-bottom: 30px; border-radius: 10px;
+      }
+      #instructions-overlay h2 { font-family: sans-serif; color: #333; margin-bottom: 10px; }
+
+      /* Standard Scanning Overlay */
+      #scanning-overlay {
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: rgba(0, 0, 0, 0.8);
+        display: flex; flex-direction: column; justify-content: center; align-items: center;
+        color: white; font-family: sans-serif; z-index: 99; text-align: center;
+        padding: 20px;
+      }
+      #scanning-overlay.hidden, #instructions-overlay.hidden { display: none !important; }
+
+      #ui-container {
+        position: fixed; bottom: 20px; left: 50%;
+        transform: translateX(-50%); z-index: 100;
+        display: flex; gap: 10px; justify-content: center; width: 95%;
+      }
+      .btn {
+        background: #000; color: white; border: 2px solid #000;
+        padding: 15px 35px; border-radius: 30px; font-family: sans-serif;
+        font-weight: bold; cursor: pointer; font-size: 16px;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .btn-secondary {
+        background: rgba(0, 0, 0, 0.75); border-color: #fff; font-size: 14px;
+      }
+    </style>
+
+    <script>
+      const TARGETS = [
+        { name: "Dance",    modelSrc: "dance3.glb",    scale: "0.5 0.5 0.5",    pos: "0 0.1 0" },
+        { name: "Running", modelSrc: "running2.glb", scale: "1 1 1", pos: "0 0.2 0" },
+        { name: "Celebrate", modelSrc: "dudleycelebrate.glb", scale: "1 1 1", pos: "0 0 0" }
+      ];
+
+      AFRAME.registerComponent('gesture-handler', {
+        schema: { speed: {default: 2}, sensitive: {default: 0.005} },
+        init: function() {
+          this.initialScale = this.el.object3D.scale.clone();
+          this.currentScale = 1;
+          this.lastDist = 0;
+          this.ifMouseDown = false;
+          
+          const handleTouchStart = (e) => {
+            if (e.touches.length === 1) {
+              this.ifMouseDown = true;
+              this.x_cord = e.touches[0].clientX;
+            } else if (e.touches.length === 2) {
+              this.ifMouseDown = false;
+              this.lastDist = Math.hypot(
+                e.touches[0].pageX - e.touches[1].pageX,
+                e.touches[0].pageY - e.touches[1].pageY
+              );
+            }
+          };
+
+          const handleTouchMove = (e) => {
+            if (e.touches.length === 1 && this.ifMouseDown) {
+              let x = e.touches[0].clientX;
+              let temp_x = x - this.x_cord;
+              this.el.object3D.rotateY(temp_x * (this.data.speed / 1000));
+              this.x_cord = x;
+            } else if (e.touches.length === 2) {
+              let dist = Math.hypot(
+                e.touches[0].pageX - e.touches[1].pageX,
+                e.touches[0].pageY - e.touches[1].pageY
+              );
+              let diff = (dist - this.lastDist) * this.data.sensitive;
+              this.currentScale = Math.max(0.1, this.currentScale + diff);
+              this.el.object3D.scale.set(
+                this.initialScale.x * this.currentScale,
+                this.initialScale.y * this.currentScale,
+                this.initialScale.z * this.currentScale
+              );
+              this.lastDist = dist;
+            }
+          };
+
+          const handleEnd = () => { this.ifMouseDown = false; this.lastDist = 0; };
+          window.addEventListener('touchstart', handleTouchStart);
+          window.addEventListener('touchmove', handleTouchMove);
+          window.addEventListener('touchend', handleEnd);
+        }
+      });
+    </script>
+  </head>
+  <body>
+
+    <div id="instructions-overlay">
+      <h2>How to Interact</h2>
+      <img src="arphone.png" alt="AR Instructions">
+      <button class="btn" id="startButton">Continue to Experience</button>
+    </div>
+
+    <div id="scanning-overlay" class="hidden">
+      <p id="scanning-text">Preparing AR Camera...</p>
+    </div>
+
+    <div id="ui-container">
+      <button class="btn btn-secondary" id="toggleMode">Switch Vertical View</button>
+    </div>
+
+    <a-scene id="ar-scene"
+      mindar-image="imageTargetSrc: ./targets.mind; autoStart: false; uiScanning: #scanning-overlay; filterMinCF: 0.0001; filterBeta: 0.001;"
+      device-orientation-permission-ui="enabled: false"
+      color-space="sRGB" 
+      renderer="colorManagement: true, physicallyCorrectLights: true" 
+      vr-mode-ui="enabled: false">
+      
+      <a-assets id="asset-container"></a-assets>
+      <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+      <a-entity light="type: hemisphere; intensity: 2.0"></a-entity>
+      <a-entity light="type: directional; intensity: 1.5" position="-1 2 1"></a-entity>
+    </a-scene>
+
+    <script>
+      const sceneEl = document.querySelector('a-scene');
+      const assetContainer = document.querySelector('#asset-container');
+      const overlay = document.querySelector('#scanning-overlay');
+      const scanText = document.querySelector('#scanning-text');
+      const splash = document.querySelector('#instructions-overlay');
+      const startBtn = document.querySelector('#startButton');
+      let isVertical = false;
+
+      // Handle Splash Screen Start
+      startBtn.addEventListener('click', () => {
+        splash.classList.add('hidden'); // Hide splash
+        overlay.classList.remove('hidden'); // Show scanning overlay
+        sceneEl.systems["mindar-image-system"].start(); // Manually start AR
+      });
+
+      sceneEl.addEventListener('loaded', () => {
+        TARGETS.forEach((config, index) => {
+          const asset = document.createElement('a-asset-item');
+          asset.setAttribute('id', `model-${index}`);
+          asset.setAttribute('src', config.modelSrc);
+          assetContainer.appendChild(asset);
+
+          const target = document.createElement('a-entity');
+          target.setAttribute('mindar-image-target', `targetIndex: ${index}`);
+
+          const model = document.createElement('a-gltf-model');
+          model.setAttribute('src', `#model-${index}`);
+          model.setAttribute('rotation', '90 0 0');
+          model.setAttribute('position', config.pos);
+          model.setAttribute('scale', config.scale);
+          model.setAttribute('gesture-handler', ''); 
+          model.setAttribute('animation-mixer', '');
+          
+          target.appendChild(model);
+          sceneEl.appendChild(target);
+
+          target.addEventListener("targetFound", () => { overlay.classList.add("hidden"); });
+          target.addEventListener("targetLost", () => { overlay.classList.remove("hidden"); });
+        });
+
+        const namesList = TARGETS.map(t => t.name).join(", ");
+        scanText.innerText = "Point camera at:\n" + namesList;
+      });
+
+      document.querySelector('#toggleMode').addEventListener('click', function() {
+        isVertical = !isVertical;
+        this.innerText = isVertical ? "Switch Flat View" : "Switch Vertical View";
+        document.querySelectorAll('a-gltf-model').forEach(model => {
+          model.setAttribute('rotation', isVertical ? '0 0 0' : '90 0 0');
+        });
+      });
+    </script>
+  </body>
+</html>
